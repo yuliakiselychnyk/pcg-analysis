@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+
+.env
+
+.DS_Store
+Thumbs.db
+
+.vscode/
+
+figures/*.png
+results/*.csv
