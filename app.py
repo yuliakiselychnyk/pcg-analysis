@@ -3,14 +3,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
-from src.export_utils import save_dataframe_to_csv, save_figure_to_png
+
 from src.data_loader import read_signal_file
 from src.signal_processing import (
     bandpass_filter,
     calculate_spectrum,
     calculate_rms
 )
-from src.analysis import analyze_file
+from src.analysis import analyze_file, recommend_signal_for_analysis
+from src.export_utils import save_dataframe_to_csv, save_figure_to_png
 
 
 st.set_page_config(
@@ -53,6 +54,12 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+SIGNAL_COLORS = {
+    "signal_1": "#1f77b4",
+    "signal_2": "#ff7f0e",
+    "signal_3": "#2ca02c"
+}
 
 
 if "selected_mode" not in st.session_state:
@@ -170,11 +177,23 @@ sampling_rate = st.sidebar.number_input(
     step=1
 )
 
-selected_signal = st.sidebar.selectbox(
-    "Оберіть сигнал для аналізу",
-    ["signal_1", "signal_2", "signal_3"],
-    index=1
+signal_selection_mode = st.sidebar.radio(
+    "Спосіб вибору сигналу",
+    ["Автоматично", "Вручну"],
+    index=0
 )
+
+manual_selected_signal = st.sidebar.selectbox(
+    "Оберіть сигнал вручну",
+    ["signal_1", "signal_2", "signal_3"],
+    index=1,
+    disabled=(signal_selection_mode == "Автоматично")
+)
+
+selected_signal = "signal_2"
+
+if signal_selection_mode == "Вручну":
+    selected_signal = manual_selected_signal
 
 st.sidebar.divider()
 st.sidebar.subheader("Параметри фільтрації")
@@ -227,6 +246,22 @@ if st.session_state.selected_mode == "single":
     if uploaded_file is not None:
         try:
             df = read_signal_file(uploaded_file, sampling_rate)
+
+            recommended_signal = None
+            recommendation_results = None
+
+            if signal_selection_mode == "Автоматично":
+                recommended_signal, recommendation_results = recommend_signal_for_analysis(
+                    dataframe=df,
+                    sampling_rate=sampling_rate,
+                    lowcut=lowcut,
+                    highcut=highcut,
+                    filter_order=filter_order,
+                    min_peak_distance_sec=min_peak_distance_sec,
+                    peak_prominence=peak_prominence
+                )
+
+                selected_signal = recommended_signal
 
             max_time = float(df["time_seconds"].max())
 
@@ -305,6 +340,16 @@ if st.session_state.selected_mode == "single":
 
             st.success(f"Файл успішно завантажено: {uploaded_file.name}")
 
+            if signal_selection_mode == "Автоматично":
+                st.info(
+                    f"Автоматично рекомендований сигнал для аналізу: `{selected_signal}`. "
+                    "Рекомендація сформована на основі характеристик сигналу після фільтрації."
+                )
+            else:
+                st.info(
+                    f"Для аналізу вручну обрано сигнал: `{selected_signal}`."
+                )
+
             metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
 
             with metric_col1:
@@ -352,6 +397,11 @@ if st.session_state.selected_mode == "single":
                     st.write(f"Частота дискретизації: `{sampling_rate} Гц`")
                     st.write(f"Тривалість сигналу: `{max_time:.2f} секунд`")
 
+                if recommendation_results is not None:
+                    with st.expander("Показати результати автоматичної рекомендації сигналу"):
+                        recommendation_df = pd.DataFrame(recommendation_results)
+                        st.dataframe(recommendation_df, use_container_width=True)
+
             with tab_signal:
                 st.subheader("Візуалізація сигналів")
 
@@ -362,9 +412,13 @@ if st.session_state.selected_mode == "single":
 
                     fig_all, ax_all = plt.subplots(figsize=(8, 4))
 
-                    ax_all.plot(df["time_seconds"], df["signal_1"], label="signal_1")
-                    ax_all.plot(df["time_seconds"], df["signal_2"], label="signal_2")
-                    ax_all.plot(df["time_seconds"], df["signal_3"], label="signal_3")
+                    for signal_name in ["signal_1", "signal_2", "signal_3"]:
+                        ax_all.plot(
+                            df["time_seconds"],
+                            df[signal_name],
+                            label=signal_name,
+                            color=SIGNAL_COLORS[signal_name]
+                        )
 
                     ax_all.set_title("Усі сигнали")
                     ax_all.set_xlabel("Час, с")
@@ -382,7 +436,8 @@ if st.session_state.selected_mode == "single":
                     ax_one.plot(
                         df["time_seconds"],
                         df[selected_signal],
-                        label=selected_signal
+                        label=selected_signal,
+                        color=SIGNAL_COLORS[selected_signal]
                     )
 
                     ax_one.set_title(f"Окремий графік: {selected_signal}")
@@ -406,7 +461,11 @@ if st.session_state.selected_mode == "single":
                     st.markdown("#### signal_1")
 
                     fig_s1, ax_s1 = plt.subplots(figsize=(5, 3))
-                    ax_s1.plot(df_fragment["time_seconds"], df_fragment["signal_1"])
+                    ax_s1.plot(
+                        df_fragment["time_seconds"],
+                        df_fragment["signal_1"],
+                        color=SIGNAL_COLORS["signal_1"]
+                    )
                     ax_s1.set_title("signal_1")
                     ax_s1.set_xlabel("Час, с")
                     ax_s1.set_ylabel("Амплітуда")
@@ -417,7 +476,11 @@ if st.session_state.selected_mode == "single":
                     st.markdown("#### signal_2")
 
                     fig_s2, ax_s2 = plt.subplots(figsize=(5, 3))
-                    ax_s2.plot(df_fragment["time_seconds"], df_fragment["signal_2"])
+                    ax_s2.plot(
+                        df_fragment["time_seconds"],
+                        df_fragment["signal_2"],
+                        color=SIGNAL_COLORS["signal_2"]
+                    )
                     ax_s2.set_title("signal_2")
                     ax_s2.set_xlabel("Час, с")
                     ax_s2.set_ylabel("Амплітуда")
@@ -428,17 +491,27 @@ if st.session_state.selected_mode == "single":
                     st.markdown("#### signal_3")
 
                     fig_s3, ax_s3 = plt.subplots(figsize=(5, 3))
-                    ax_s3.plot(df_fragment["time_seconds"], df_fragment["signal_3"])
+                    ax_s3.plot(
+                        df_fragment["time_seconds"],
+                        df_fragment["signal_3"],
+                        color=SIGNAL_COLORS["signal_3"]
+                    )
                     ax_s3.set_title("signal_3")
                     ax_s3.set_xlabel("Час, с")
                     ax_s3.set_ylabel("Амплітуда")
                     ax_s3.grid(True)
                     st.pyplot(fig_s3)
 
-                st.warning(
-                    "На цьому етапі програма не визначає автоматично, де саме PCG. "
-                    "Попередньо signal_2 використовується як основний PCG-сигнал."
-                )
+                if signal_selection_mode == "Автоматично":
+                    st.warning(
+                        f"На цьому етапі програма автоматично рекомендує `{selected_signal}` "
+                        "як найбільш придатний сигнал для подальшого аналізу. "
+                        "Рекомендація є попередньою і може бути змінена користувачем у ручному режимі."
+                    )
+                else:
+                    st.warning(
+                        f"Для подальшого аналізу користувач вручну обрав `{selected_signal}`."
+                    )
 
             with tab_fragment:
                 st.subheader("Детальний перегляд фрагмента сигналу")
@@ -453,7 +526,8 @@ if st.session_state.selected_mode == "single":
                 ax_fragment.plot(
                     df_fragment["time_seconds"],
                     df_fragment[selected_signal],
-                    label=f"{selected_signal} ({start_time:.1f}–{end_time:.1f} с)"
+                    label=f"{selected_signal} ({start_time:.1f}–{end_time:.1f} с)",
+                    color=SIGNAL_COLORS[selected_signal]
                 )
 
                 ax_fragment.set_title(f"Фрагмент сигналу: {selected_signal}")
@@ -488,7 +562,8 @@ if st.session_state.selected_mode == "single":
 
                 ax_spectrum.plot(
                     frequencies[spectrum_mask],
-                    spectrum[spectrum_mask]
+                    spectrum[spectrum_mask],
+                    color=SIGNAL_COLORS[selected_signal]
                 )
 
                 ax_spectrum.set_title(f"Спектр сигналу: {selected_signal}")
@@ -525,7 +600,10 @@ if st.session_state.selected_mode == "single":
 
                 st.info(
                     f"Для сигналу `{selected_signal}` найбільша амплітуда в межах показаного діапазону "
-                    f"спостерігається приблизно на частоті {dominant_frequency_visible:.2f} Гц."
+                    f"спостерігається приблизно на частоті {dominant_frequency_visible:.2f} Гц. "
+                    f"Оскільки частота дискретизації становить {sampling_rate} Гц, "
+                    f"максимальна частота коректного спектрального аналізу дорівнює "
+                    f"{sampling_rate / 2:.0f} Гц."
                 )
 
                 st.divider()
@@ -545,7 +623,8 @@ if st.session_state.selected_mode == "single":
                     ax_compare_spectrum.plot(
                         current_frequencies[spectrum_mask],
                         current_spectrum[spectrum_mask],
-                        label=signal_name
+                        label=signal_name,
+                        color=SIGNAL_COLORS[signal_name]
                     )
 
                 ax_compare_spectrum.set_title("Порівняння спектрів signal_1, signal_2, signal_3")
@@ -572,14 +651,16 @@ if st.session_state.selected_mode == "single":
                     df["time_seconds"],
                     df[selected_signal],
                     label="Початковий сигнал",
-                    alpha=0.7
+                    alpha=0.6,
+                    color=SIGNAL_COLORS[selected_signal]
                 )
 
                 ax_filter_full.plot(
                     df["time_seconds"],
                     df["filtered_signal"],
                     label="Відфільтрований сигнал",
-                    alpha=0.9
+                    alpha=0.95,
+                    color="#d62728"
                 )
 
                 ax_filter_full.set_title(f"Фільтрація сигналу: {selected_signal}")
@@ -598,14 +679,16 @@ if st.session_state.selected_mode == "single":
                     df_filtered_fragment["time_seconds"],
                     df_filtered_fragment[selected_signal],
                     label="Початковий фрагмент",
-                    alpha=0.7
+                    alpha=0.6,
+                    color=SIGNAL_COLORS[selected_signal]
                 )
 
                 ax_filter_fragment.plot(
                     df_filtered_fragment["time_seconds"],
                     df_filtered_fragment["filtered_signal"],
                     label="Відфільтрований фрагмент",
-                    alpha=0.9
+                    alpha=0.95,
+                    color="#d62728"
                 )
 
                 ax_filter_fragment.set_title(
@@ -651,14 +734,16 @@ if st.session_state.selected_mode == "single":
                 ax_peaks_full.plot(
                     df["time_seconds"],
                     df["filtered_signal"],
-                    label="Відфільтрований сигнал"
+                    label="Відфільтрований сигнал",
+                    color="#d62728"
                 )
 
                 ax_peaks_full.scatter(
                     peak_times,
                     peak_values,
                     label="Знайдені піки",
-                    marker="o"
+                    marker="o",
+                    color=SIGNAL_COLORS[selected_signal]
                 )
 
                 ax_peaks_full.set_title(f"Знайдені піки: {selected_signal}")
@@ -668,6 +753,7 @@ if st.session_state.selected_mode == "single":
                 ax_peaks_full.grid(True)
 
                 st.pyplot(fig_peaks_full)
+
                 if st.button("Зберегти графік піків у figures", use_container_width=True):
                     saved_path = save_figure_to_png(
                         figure=fig_peaks_full,
@@ -676,6 +762,7 @@ if st.session_state.selected_mode == "single":
                     )
 
                     st.success(f"Графік піків збережено: {saved_path}")
+
                 st.markdown("#### Піки на вибраному фрагменті")
 
                 fig_peaks_fragment, ax_peaks_fragment = plt.subplots(figsize=(14, 5))
@@ -683,14 +770,16 @@ if st.session_state.selected_mode == "single":
                 ax_peaks_fragment.plot(
                     df_filtered_fragment["time_seconds"],
                     df_filtered_fragment["filtered_signal"],
-                    label="Відфільтрований фрагмент"
+                    label="Відфільтрований фрагмент",
+                    color="#d62728"
                 )
 
                 ax_peaks_fragment.scatter(
                     fragment_peak_times,
                     fragment_peak_values,
                     label="Піки у фрагменті",
-                    marker="o"
+                    marker="o",
+                    color=SIGNAL_COLORS[selected_signal]
                 )
 
                 ax_peaks_fragment.set_title(
@@ -705,7 +794,7 @@ if st.session_state.selected_mode == "single":
                 st.pyplot(fig_peaks_fragment)
 
                 with st.expander("Показати таблицю знайдених піків"):
-                 st.dataframe(peaks_df, use_container_width=True)
+                    st.dataframe(peaks_df, use_container_width=True)
 
                 if st.button("Зберегти таблицю піків у results", use_container_width=True):
                     saved_path = save_dataframe_to_csv(
@@ -837,6 +926,7 @@ if st.session_state.selected_mode == "compare":
 
             st.markdown("#### Таблиця порівняння файлів")
             st.dataframe(comparison_df, use_container_width=True)
+
             if st.button("Зберегти таблицю порівняння у results", use_container_width=True):
                 saved_path = save_dataframe_to_csv(
                     dataframe=comparison_df,
@@ -852,7 +942,8 @@ if st.session_state.selected_mode == "compare":
 
             ax_files_peaks.bar(
                 comparison_df["Файл"],
-                comparison_df["Кількість піків"]
+                comparison_df["Кількість піків"],
+                color="#1f77b4"
             )
 
             ax_files_peaks.set_title("Порівняння кількості піків у файлах")
@@ -861,7 +952,17 @@ if st.session_state.selected_mode == "compare":
             ax_files_peaks.tick_params(axis="x", rotation=25)
             ax_files_peaks.grid(True, axis="y")
 
+            for index, value in enumerate(comparison_df["Кількість піків"]):
+                ax_files_peaks.text(
+                    index,
+                    value,
+                    str(value),
+                    ha="center",
+                    va="bottom"
+                )
+
             st.pyplot(fig_files_peaks)
+
             if st.button("Зберегти графік кількості піків у figures", use_container_width=True):
                 saved_path = save_figure_to_png(
                     figure=fig_files_peaks,
@@ -877,7 +978,8 @@ if st.session_state.selected_mode == "compare":
 
             ax_files_rms.bar(
                 comparison_df["Файл"],
-                comparison_df["RMS після фільтрації"]
+                comparison_df["RMS після фільтрації"],
+                color="#1f77b4"
             )
 
             ax_files_rms.set_title("Порівняння RMS після фільтрації")
@@ -886,7 +988,17 @@ if st.session_state.selected_mode == "compare":
             ax_files_rms.tick_params(axis="x", rotation=25)
             ax_files_rms.grid(True, axis="y")
 
+            for index, value in enumerate(comparison_df["RMS після фільтрації"]):
+                ax_files_rms.text(
+                    index,
+                    value,
+                    f"{value:.2f}",
+                    ha="center",
+                    va="bottom"
+                )
+
             st.pyplot(fig_files_rms)
+
             if st.button("Зберегти графік RMS у figures", use_container_width=True):
                 saved_path = save_figure_to_png(
                     figure=fig_files_rms,
